@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>誓约竞技场 · Oath Arena</title>
+<meta name="description" content="基于北航 OOpre 面向对象先导课作业引擎的 2.5D 回合制混战游戏">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;700;900&family=Noto+Serif+SC:wght@500;700;900&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body class="at-title">
+<canvas id="world"></canvas>
+
+<!-- ================= HUD ================= -->
+<div id="hud" class="hidden">
+  <div id="topbar">
+    <div id="roundBox"><label>ROUND</label><b id="roundNum">1</b></div>
+    <div id="turnbar"></div>
+    <div id="topBtns"><button id="btnTerm" class="tbtn"></button><button id="btnSpeed" class="tbtn"></button><button id="btnSound" class="tbtn"></button><button id="btnMenu" class="tbtn"></button></div>
+  </div>
+
+  <div id="heroPanel" class="panel">
+    <canvas id="heroPortrait" class="portrait" width="84" height="84" data-p="Hero"></canvas>
+    <div class="hp-main">
+      <div class="hp-name"><b id="heroName">誓约者</b><small id="heroTitle"></small></div>
+      <div class="bigbar hp"><i id="hpLag" class="lag"></i><i id="hpFill" class="fill"></i><span class="half"></span><em id="hpText">0/0</em></div>
+      <div class="bigbar sh"><i id="shFill" class="fill"></i><em id="shText"></em></div>
+      <div class="hp-stats">
+        <div><label>攻击</label><b id="stAtk">0</b></div>
+        <div><label>护甲</label><b id="stArm">0</b></div>
+        <div><label>背包</label><b id="stItems">0</b></div>
+      </div>
+      <div id="heroArmor"></div>
+    </div>
+  </div>
+
+  <div id="inspect" class="panel hidden"></div>
+  <div id="thinking" class="panel hidden"></div>
+
+  <div id="bottom">
+    <div id="handLabel"></div>
+    <div id="actions"></div>
+    <div id="hotbar"></div>
+  </div>
+
+  <div id="terminal" class="panel">
+    <div class="th"><div><b>OOPRE ENGINE</b><small>指令终端 · 输出与 Java 版逐字一致</small></div><span id="termCount">0</span><button id="termClose" class="iconbtn"></button></div>
+    <div id="termBody"></div>
+    <button id="termCopy" class="ghost small"></button>
+  </div>
+</div>
+
+<div id="banner"></div>
+<div id="fps" class="hidden"></div>
+<div id="toasts"></div>
+<div id="tooltip"></div>
+
+<!-- ================= 背包 ================= -->
+<div id="bag" class="modal hidden">
+  <div class="bag-in panel">
+    <div class="bag-h"><div><b>背包</b><small id="bagCount"></small></div><button id="bagClose" class="iconbtn"></button></div>
+    <div class="bag-body">
+      <div class="bag-left"><div class="doll"></div><div id="bagArmor"></div></div>
+      <div class="bag-mid">
+        <div class="sec">背包栏 9–35</div><div id="bagGrid" class="grid"></div>
+        <div class="sec">快捷栏 0–8 <span class="mut">（高亮为主手）</span></div><div id="bagHot" class="grid"></div>
+      </div>
+      <div id="bagDetail"></div>
+    </div>
+  </div>
+</div>
+
+<div id="loot" class="modal hidden"></div>
+<div id="confirm" class="modal hidden"></div>
+<div id="settings" class="modal hidden"></div>
+<div id="end" class="hidden"></div>
+
+<!-- ================= 标题 ================= -->
+<div id="title">
+  <div class="t-in">
+    <div class="logo">
+      <div class="crest"><svg viewBox="0 0 120 120"><defs><linearGradient id="gg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff2c4"/><stop offset=".5" stop-color="#e8b85a"/><stop offset="1" stop-color="#8a5a1a"/></linearGradient></defs>
+        <circle cx="44" cy="60" r="30" fill="none" stroke="url(#gg)" stroke-width="4"/><circle cx="76" cy="60" r="30" fill="none" stroke="url(#gg)" stroke-width="4"/>
+        <path d="M60 14 L60 106 M52 26 L68 26" stroke="url(#gg)" stroke-width="4" stroke-linecap="round"/><path d="M60 8 L64 16 L60 22 L56 16Z" fill="url(#gg)"/></svg></div>
+      <h1>誓约竞技场</h1>
+      <div class="l2">O A T H &nbsp; A R E N A</div>
+      <div class="l3">守护你的人，与你要击倒的人，同样重要</div>
+    </div>
+    <div class="t-form">
+      <label class="namef"><span>你的名字</span><input id="nameIn" maxlength="12" placeholder="誓约者" autocomplete="off"></label>
+      <div id="oppSel"><span>对手</span><button data-n="3">3</button><button data-n="4">4</button><button data-n="5">5</button></div>
+    </div>
+    <div class="t-btns">
+      <button id="tStart" class="gold big">开始对局</button>
+      <div class="row"><button id="tTut" class="ghost">新手引导</button><button id="tSet" class="ghost">设置</button></div>
+    </div>
+    <div class="t-foot">北航 2026 面向对象先导课 · OOpre 作业引擎逐类移植 · 与 Java 版对拍输出逐字一致</div>
+  </div>
+  <div class="t-press">点击任意处 · 唤醒声音</div>
+</div>
+
+<!-- ================= 新手引导 ================= -->
+<div id="tut" class="hidden"><div id="tutSpot"></div><div id="tutBox" class="panel"></div></div>
+
+<script src="js/engine.js"></script>
+<script src="js/data.js"></script>
+<script src="js/util.js"></script>
+<script src="js/audio.js"></script>
+<script src="js/icons.js"></script>
+<script src="js/world.js"></script>
+<script src="js/director.js"></script>
+<script src="js/ai.js"></script>
+<script src="js/game.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/tutorial.js"></script>
+<script src="js/main.js"></script>
+</body>
+</html>
