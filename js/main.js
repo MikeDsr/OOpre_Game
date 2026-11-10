@@ -14,6 +14,8 @@ OO.main = (() => {
     bindTitle();
     showTitle();
     requestAnimationFrame(frame);
+    const room = new URLSearchParams(location.search).get('room');
+    if (room && /^[A-Za-z0-9]{4,8}$/.test(room)) OO.online.openLobby(room.toUpperCase());
   }
 
   function frame(t) {
@@ -68,7 +70,7 @@ OO.main = (() => {
     window.addEventListener('keydown', e => {
       if (e.target.tagName === 'INPUT') return;
       OO.audio.unlock();
-      if (titleMode) { if (e.key === 'Enter') $('#tStart').click(); return; }
+      if (titleMode) { if (e.key === 'Enter' && $('#lobby').classList.contains('hidden')) $('#tStart').click(); return; }
       const k = e.key.toLowerCase();
       if (k >= '1' && k <= '9') { if (OO.ui.heroTurn) OO.game.heroAct('slot', { slot: +k - 1 }); return; }
       if (k === 'a') OO.ui.doAct('attack');
@@ -107,6 +109,7 @@ OO.main = (() => {
       if (!U.store.get('tutDone', false)) startTutorial(); else startMatch();
     };
     $('#tTut').onclick = () => { OO.audio.unlock(); OO.ui.applyMute(); startTutorial(); };
+    $('#tOnline').onclick = () => { OO.audio.unlock(); OO.ui.applyMute(); U.store.set('name', $('#nameIn').value.trim()); OO.online.openLobby(); };
     $('#tSet').onclick = () => { OO.audio.unlock(); $('#btnMenu').click(); };
     $('#title').addEventListener('pointerdown', () => { OO.audio.unlock(); OO.ui.applyMute(); $('#title').classList.add('awake'); });
     refreshTitleBtn();
@@ -157,11 +160,20 @@ OO.main = (() => {
   }
 
   function menu(x) {
+    if (OO.online.active) { // 联机中：重开 / 引导 / 回标题 都意味着离开房间
+      if (x === 'restart') { OO.ui.toast('联机对局中无法重开，可等本局结束后由房主发起再来一局', 'red'); return; }
+      OO.online.leave();
+      if (x === 'tutorial') startTutorial();
+      return;
+    }
     if (x === 'restart') { if (titleMode) $('#tStart').click(); else startMatch(); }
     else if (x === 'title') { leaveTitle(); OO.game.over = true; showTitle(); }
     else if (x === 'tutorial') startTutorial();
   }
+  /* 联机：进入对局画面 / 回到大厅背景 */
+  function enterOnline() { leaveTitle(); }
+  async function lobbyScene() { leaveTitle(); OO.game.over = true; await showTitle(); $('#title').classList.add('hidden'); }
 
-  return { boot, menu, get titleMode() { return titleMode; } };
+  return { boot, menu, enterOnline, lobbyScene, get titleMode() { return titleMode; } };
 })();
 window.addEventListener('DOMContentLoaded', () => OO.main.boot());

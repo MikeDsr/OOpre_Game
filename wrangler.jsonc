@@ -1,0 +1,19 @@
+// 誓约竞技场 · Cloudflare 部署配置
+// 同一个 Worker：静态资源（游戏网页）+ /ws/<房间码>（联机房间，Durable Object）
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "oath-arena",
+  "main": "server/worker.js",
+  "compatibility_date": "2026-11-01",
+  "assets": {
+    "directory": ".",
+    "binding": "ASSETS",
+    "run_worker_first": ["/ws/*", "/api/*"]
+  },
+  "durable_objects": {
+    "bindings": [{ "name": "ROOMS", "class_name": "Room" }]
+  },
+  // 免费计划只支持 SQLite 后端的 Durable Object
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Room"] }],
+  "observability": { "enabled": true }
+}

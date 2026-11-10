@@ -61,7 +61,7 @@ OO.game = (() => {
     G.busy = false;
     G.sys = new OO.GameSystem();
     G.mode = opts.mode || 'match';
-    G.round = 0; G.over = false; G.heroActed = null; G.idc = 0; G.grudges.clear(); G.betrayals.clear(); G.defs.clear(); G.deathOrder = [];
+    G.round = 0; G.over = false; G.heroActed = null; G.idc = 0; G.bloodSince = 0; OO.world.bloodMoon = 0; G.grudges.clear(); G.betrayals.clear(); G.defs.clear(); G.deathOrder = [];
     G.stats = { dealt: 0, taken: 0, kills: 0, aided: 0, rounds: 0 };
     G.hook = opts.hook || null;
     OO.world.clearChars();
@@ -96,6 +96,41 @@ OO.game = (() => {
     refreshRelations();
     OO.ui.refreshAll();
     OO.ui.showHUD(true);
+  }
+
+  /* ---------------- 联机：按服务器给的阵容建局（指令由服务器下发） ---------------- */
+  function setupOnline(roster, me) {
+    G.session++;
+    const pend = G.heroResolve; G.heroResolve = null; if (pend) pend();
+    G.busy = false; G.mode = 'online';
+    G.sys = new OO.GameSystem();
+    G.round = 0; G.over = false; G.idc = 0; G.grudges.clear(); G.betrayals.clear(); G.defs.clear(); G.deathOrder = [];
+    G.stats = { dealt: 0, taken: 0, kills: 0, aided: 0, rounds: 0 };
+    G.hook = null; G.bloodSince = 0; OO.world.bloodMoon = 0;
+    OO.world.clearChars();
+    OO.ui.clearLog();
+    G.heroId = me || roster[0].char;
+    const n = roster.length, mi = Math.max(0, roster.findIndex(r => r.char === G.heroId));
+    roster.forEach((r, i) => {
+      const base = D.characters.find(c => c.id === r.char);
+      const def = Object.assign({}, base, { name: r.name, title: r.pid ? `${base.name} · ${base.title}` : base.title, isHero: r.char === me, human: !!r.pid });
+      G.defs.set(def.id, def);
+      // 每个客户端都把自己放在镜头正前方，其余人按加入顺序绕场
+      const angle = Math.PI / 2 + (i - mi) / n * U.TAU;
+      const snap = { name: def.id, hp: def.hp, max: def.max, shield: def.shield, atk: def.atk, alive: true, slotId: 0, hand: null, armor: [null, null, null, null], armorValue: 0, items: 0, subs: [] };
+      OO.world.addChar(def, snap, angle);
+    });
+    OO.ui.buildTurnBar(roster.map(r => r.char));
+    refreshRelations();
+    OO.ui.showHUD(true);
+    OO.ui.refreshAll();
+  }
+  /* 断线重连时快速重放历史指令：只更新状态，不播动画 */
+  async function execQuiet(cmd) {
+    const r = G.sys.execute(cmd);
+    await OO.director.play(r.events, { quiet: true });
+    for (const e of r.events) if (e.type === 'death') { G.deathOrder.push(e.player); const ch = OO.world.chars.get(e.player); if (ch) { ch.grave = true; ch.a.dissolve = 1; } }
+    refreshRelations();
   }
 
   async function start(opts = {}) {
@@ -140,6 +175,9 @@ OO.game = (() => {
       }
       OO.world.setActive(null);
       if (G.over || gone()) break;
+      await cursePhase();
+      if (gone()) return;
+      if (checkEnd()) break;
       await lootPhase();
       if (gone()) return;
       await maybeProposals();
@@ -224,6 +262,7 @@ OO.game = (() => {
 
   /* ---------------- 主角行动 ---------------- */
   async function heroAct(kind, arg) {
+    if (G.mode === 'online') return OO.online.act(kind, arg);
     if (!G.heroResolve || G.busy || G.over) return false;
     const h = P(G.heroId), hn = G.heroId;
     if (!h || h.isDead()) return false;
@@ -297,9 +336,54 @@ OO.game = (() => {
     addGrudge(tgt, hn, 2);
   }
 
+  /* ---------------- 血月（收尾机制，单机 / 服务器 / 模拟共用） ---------------- */
+  const SUSTAIN = ['HealPotion', 'AbsorptionPotion'];
+  function bloodTrigger(round, aliveCount) {
+    const E = D.endgame;
+    return round >= E.round || (aliveCount <= 2 && round >= E.minRound);
+  }
+  function curseAmp(p, k) {
+    const E = D.endgame;
+    return Math.min(5000, Math.max(1, Math.ceil(p.getMaxHitPoint() * (E.base + E.step * (k - 1)))));
+  }
+  /* 让 p 对自己使用一瓶血月毒瓶：add_potion → 换到主手 → use_item → 换回。
+     返回 { main: 先执行的指令, back: 还活着时再执行的换回指令 }；背包满时返回 null */
+  function curseCmds(p, k, mkItemCmd) {
+    let slot = -1;
+    for (let i = 0; i < 36; i++) if (!p.inventory.getItem(i)) { slot = i; break; }
+    if (slot < 0) return null;
+    const n = p.name, cur = p.slotId;
+    const add = mkItemCmd(n, ['potion', 'DamagePotion', 'curse', curseAmp(p, k)]);
+    if (slot === cur) return { main: [add, `use_item ${n} ${n}`], back: null };
+    return { main: [add, `swap ${n} ${slot} ${cur}`, `use_item ${n} ${n}`], back: `swap ${n} ${slot} ${cur}` };
+  }
+
+  async function cursePhase() {
+    const alive = G.sys.playerList.filter(p => !p.isDead());
+    if (!G.bloodSince && bloodTrigger(G.round, alive.length)) {
+      G.bloodSince = G.round;
+      OO.world.bloodMoon = 1;
+      OO.audio.play('death', { vol: 0.6 }); OO.audio.play('alarm');
+      OO.ui.banner('血月降临', '补给中不再有治疗与护盾药剂 · 每轮结束所有人遭受侵蚀', 'alarm');
+      await U.wait(2);
+    }
+    if (!G.bloodSince) return;
+    const k = G.round - G.bloodSince + 1, E = D.endgame;
+    OO.ui.banner('血月侵蚀', `第 ${k} 轮 · 每人受到最大体力 ${Math.round((E.base + E.step * (k - 1)) * 100)}% 的魔法伤害`, 'alarm');
+    await U.wait(0.8);
+    for (const p of G.sys.playerList) {
+      if (p.isDead() || G.over) continue;
+      const c = curseCmds(p, k, itemCmd);
+      if (!c) continue;
+      for (const cmd of c.main) await exec(cmd, { actor: p.name });
+      if (c.back && !p.isDead()) await exec(c.back, { actor: p.name });
+    }
+  }
+
   /* ---------------- 战利品 ---------------- */
-  function rollItem(round, forHero) {
-    const type = U.weighted(D.loot.weights);
+  function rollItem(round, forHero, noSustain) {
+    let type = U.weighted(D.loot.weights);
+    while (noSustain && SUSTAIN.includes(type)) type = U.weighted(D.loot.weights);
     const boost = Math.min(round * 0.06, 0.6);
     const rw = {}; D.rarity.forEach((r, i) => rw[i] = r.w * (i ? 1 + boost * i * 1.4 : 1 - boost * 0.5));
     const ri = +U.weighted(rw), rar = D.rarity[ri];
@@ -320,7 +404,8 @@ OO.game = (() => {
   async function lootPhase() {
     const h = P(G.heroId);
     if (h && !h.isDead()) {
-      const cards = [rollItem(G.round, true), rollItem(G.round, true), rollItem(G.round, true)];
+      const ns = !!G.bloodSince;
+      const cards = [rollItem(G.round, true, ns), rollItem(G.round, true, ns), rollItem(G.round, true, ns)];
       cards.forEach(c => c.preview = itemCmd(G.heroId, c.spec)); // 预生成 ID，确保展示指令与实际一致
       const sess = G.session;
       const pick = await OO.ui.showLoot(cards, h.getItemCount());
@@ -331,7 +416,7 @@ OO.game = (() => {
     const events = [];
     for (const p of G.sys.playerList) {
       if (p.isDead() || p.name === G.heroId) continue;
-      const r = G.sys.execute(itemCmd(p.name, rollItem(G.round, false).spec));
+      const r = G.sys.execute(itemCmd(p.name, rollItem(G.round, false, !!G.bloodSince).spec));
       events.push(...r.events);
       OO.world.fx.beam(p.name, '#9fd0ff', { life: 0.9, w: 22 });
     }
@@ -361,7 +446,11 @@ OO.game = (() => {
 
   const api = {
     get sys() { return G.sys; }, get heroId() { return G.heroId; }, get round() { return G.round; },
-    get busy() { return G.busy; }, get over() { return G.over; }, get isHeroTurn() { return !!G.heroResolve; },
+    get busy() { return G.mode === 'online' ? OO.online.busy : G.busy; }, get over() { return G.over; },
+    get isHeroTurn() { return G.mode === 'online' ? OO.online.myTurn : !!G.heroResolve; },
+    set round(v) { G.round = v; if (G.stats) G.stats.rounds = v; },
+    isHuman: n => G.mode === 'online' ? OO.online.isHuman(n) : n === G.heroId,
+    setupOnline, execQuiet, updateIntensity, bloodTrigger, curseCmds, curseAmp,
     get mode() { return G.mode; }, set opponents(v) { G.opponents = v; }, get opponents() { return G.opponents; },
     get stats() { return G.stats; },
     defOf: n => G.defs.get(n) || {},

@@ -9,7 +9,7 @@ for (const f of ['engine.js', 'data.js', 'util.js', 'ai.js', 'game.js']) vm.runI
 const OO = ctx.OO, U = OO.U, D = OO.data;
 
 const N = +process.argv[2] || 300, OPP = +process.argv[3] || 4;
-const agg = { rounds: [], heroWin: 0, heroPlace: [], aids: 0, deaths: 0, cmds: 0, duels: 0, winners: {}, errors: 0, maxRound: 0, fullInv: 0, broken: 0 };
+const agg = { blood: 0, rounds: [], heroWin: 0, heroPlace: [], aids: 0, deaths: 0, cmds: 0, duels: 0, winners: {}, errors: 0, maxRound: 0, fullInv: 0, broken: 0 };
 
 for (let g = 0; g < N; g++) {
   const sys = new OO.GameSystem();
@@ -30,7 +30,7 @@ for (let g = 0; g < N; g++) {
     heroId: 'Hero', defOf: n => defs.get(n) || {}, grudge: (a, b) => grudges.get(a + '>' + b) || 0, betrayedBy: () => false,
     aiFriendly: (me, o) => me.getSubscribingPlayers().includes(o),
   };
-  let round = 0, deathOrder = [];
+  let round = 0, deathOrder = [], bloodSince = 0;
   try {
     while (round < 80) {
       round++;
@@ -42,9 +42,21 @@ for (let g = 0; g < N; g++) {
         const plan = OO.ai.decide(sys, p, api);
         for (const c of plan.steps) { const r = run(c); for (const e of r.events) if (e.type === 'death') deathOrder.push(e.player); }
       }
+      if (sys.playerList.filter(x => !x.isDead()).length < 2) break;
+      // 血月
+      if (!bloodSince && OO.game.bloodTrigger(round, sys.playerList.filter(x => !x.isDead()).length)) { bloodSince = round; agg.blood++; }
+      if (bloodSince) {
+        for (const p of sys.playerList) {
+          if (p.isDead()) continue;
+          const c = OO.game.curseCmds(p, round - bloodSince + 1, itemCmd);
+          if (!c) continue;
+          for (const x of c.main) { const r = run(x); for (const e of r.events) if (e.type === 'death') deathOrder.push(e.player); }
+          if (c.back && !p.isDead()) run(c.back);
+        }
+      }
       const alive = sys.playerList.filter(x => !x.isDead());
       if (alive.length < 2) break;
-      for (const p of alive) run(itemCmd(p.name, OO.game.rollItem(round).spec));
+      for (const p of alive) run(itemCmd(p.name, OO.game.rollItem(round, false, !!bloodSince).spec));
     }
   } catch (e) { agg.errors++; if (agg.errors < 3) console.error(e); }
   const alive = sys.playerList.filter(x => !x.isDead());
@@ -59,4 +71,5 @@ console.log(`局数 ${N}，对手 ${OPP}`);
 console.log(`平均轮数 ${avg(agg.rounds)}（中位 ${sorted[N >> 1]}，最长 ${agg.maxRound}）`);
 console.log(`主角(AI 操作)胜率 ${(agg.heroWin / N * 100).toFixed(1)}%，期望 ${(100 / (OPP + 1)).toFixed(1)}%`);
 console.log('胜者分布', agg.winners);
+console.log(`血月触发 ${(agg.blood / N * 100).toFixed(0)}% 的对局`);
 console.log(`每局：援助 ${(agg.aids / N).toFixed(1)} 次，装备碎裂 ${(agg.broken / N).toFixed(1)} 次，背包满 ${(agg.fullInv / N).toFixed(1)} 次，指令 ${(agg.cmds / N).toFixed(0)} 条；最终决战触发 ${agg.duels} 次；异常 ${agg.errors}`);

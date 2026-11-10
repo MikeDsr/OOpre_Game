@@ -44,8 +44,11 @@ OO.ai = (() => {
     const free = [];
 
     // 0. 背誓：被主角背叛或攻击 → 先解除自己对主角的守护
-    const hero = sys.findPlayer(game.heroId);
-    if (hero && game.betrayedBy(n) && me.getSubscribingPlayers().includes(hero)) free.push(`remove_subscribe ${n} ${hero.name}`);
+    // 单机：只有主角会背誓；联机（game.multi）：按“谁背叛了我”逐个判断
+    for (const p of me.getSubscribingPlayers().slice()) {
+      const betrayed = game.multi ? game.betrayedBy(n, p.name) : (p.name === game.heroId && game.betrayedBy(n));
+      if (betrayed && !free.includes(`remove_subscribe ${n} ${p.name}`)) free.push(`remove_subscribe ${n} ${p.name}`);
+    }
 
     // 1. 保命
     if (hpR < 0.38 + prof.heal * 0.15) {
@@ -80,7 +83,7 @@ OO.ai = (() => {
       const dmg = predict(me, e, swVal);
       let s = (1 - e.getHitPoint() / e.getMaxHitPoint()) * 1.1 + dmg / Math.max(eh, 1) * 1.6;
       if (dmg >= eh) s += 2;
-      if (e.name === game.heroId) s += 0.12 * prof.aggro;
+      if (game.multi ? game.isHuman(e.name) : e.name === game.heroId) s += 0.12 * prof.aggro;
       s += (game.grudge(n, e.name) || 0) * 0.7;
       s += Math.random() * 0.5;
       if (s > ts) { ts = s; tgt = e; }
@@ -111,7 +114,7 @@ OO.ai = (() => {
   /* 主角请求结盟时，AI 是否接受；返回概率 */
   function pactChance(sys, me, hero, game) {
     const def = game.defOf(me.name), prof = def.ai || { loyalty: 0.5 };
-    if (game.grudge(me.name, hero.name) > 0.5 || game.betrayedBy(me.name)) return 0.05;
+    if (game.grudge(me.name, hero.name) > 0.5 || game.betrayedBy(me.name, hero.name)) return 0.05;
     let p = 0.25 + prof.loyalty * 0.35;
     const mine = me.getHitPoint() / me.getMaxHitPoint(), his = hero.getHitPoint() / hero.getMaxHitPoint();
     p += (his - mine) * 0.35;                  // 你比它强，它更愿意依附

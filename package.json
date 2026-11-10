@@ -1,0 +1,23 @@
+{
+  "name": "oath-arena",
+  "version": "1.1.0",
+  "private": true,
+  "description": "誓约竞技场：基于北航 OOpre 作业引擎的 2.5D 回合制混战网页游戏（支持 3–6 人联机）",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "difftest": "node tools/difftest.js",
+    "sim": "node tools/sim.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/MikeDsr/OOpre_Game.git"
+  },
+  "license": "ISC",
+  "devDependencies": {
+    "wrangler": "^4.160.0"
+  },
+  "allowScripts": {
+    "workerd@1.20261110.1": true
+  }
+}

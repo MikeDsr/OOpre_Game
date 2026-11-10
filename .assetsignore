@@ -1,0 +1,11 @@
+.git
+.gitignore
+.assetsignore
+.wrangler
+node_modules
+server
+tools
+package.json
+package-lock.json
+wrangler.jsonc
+.nojekyll

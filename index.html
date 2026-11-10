@@ -18,6 +18,7 @@
   <div id="topbar">
     <div id="roundBox"><label>ROUND</label><b id="roundNum">1</b></div>
     <div id="turnbar"></div>
+    <div id="turnTimer" class="hidden"></div>
     <div id="topBtns"><button id="btnTerm" class="tbtn"></button><button id="btnSpeed" class="tbtn"></button><button id="btnSound" class="tbtn"></button><button id="btnMenu" class="tbtn"></button></div>
   </div>
 
@@ -76,6 +77,7 @@
 <div id="confirm" class="modal hidden"></div>
 <div id="settings" class="modal hidden"></div>
 <div id="end" class="hidden"></div>
+<div id="lobby" class="hidden"></div>
 
 <!-- ================= 标题 ================= -->
 <div id="title">
@@ -94,6 +96,7 @@
     </div>
     <div class="t-btns">
       <button id="tStart" class="gold big">开始对局</button>
+      <button id="tOnline" class="ghost online-btn">联机对战 <small>3–6 人</small></button>
       <div class="row"><button id="tTut" class="ghost">新手引导</button><button id="tSet" class="ghost">设置</button></div>
     </div>
     <div class="t-foot">北航 2026 面向对象先导课 · OOpre 作业引擎逐类移植 · 与 Java 版对拍输出逐字一致</div>
@@ -115,6 +118,8 @@
 <script src="js/game.js"></script>
 <script src="js/ui.js"></script>
 <script src="js/tutorial.js"></script>
+<script src="js/net.js"></script>
+<script src="js/online.js"></script>
 <script src="js/main.js"></script>
 </body>
 </html>

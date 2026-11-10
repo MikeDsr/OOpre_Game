@@ -220,7 +220,9 @@ OO.ui = (() => {
         <div class="formula">⌈(${a} + ${dd}) × (1 − ${(reduce / 10).toFixed(1)}%)⌉</div>
         <div class="formula mut">a=基础攻击 · d=主手剑增伤 · v=${v} 护甲 → 减免 min(80%, max(0.8%·v, 4%·v − 2%·d))</div>`;
       if (hand && hand.getType() === 'DamagePotion') calc += `<div class="row"><span>噬魂毒瓶</span><b class="big purple">${hand.getAmplifier()}</b></div><div class="formula mut">魔法伤害无视护甲</div>`;
-      if (rel !== 'ally' && G().mode !== 'tutorial') calc += `<div class="row"><span>誓约成功率</span><b>${Math.round(OO.ai.pactChance(G().sys, p, h, G()) * 100)}%</b></div>`;
+      if (rel !== 'ally' && G().mode !== 'tutorial') calc += G().mode === 'online' && G().isHuman(sel)
+        ? `<div class="row"><span>誓约</span><b>需对方同意</b></div>`
+        : `<div class="row"><span>誓约成功率</span><b>${Math.round(OO.ai.pactChance(G().sys, p, h, G()) * 100)}%</b></div>`;
       const kill = dmg >= d.hp + d.shield;
       if (kill) calc += `<div class="killable">⚑ 一击可斩</div>`;
       calc += '</div>';
@@ -507,12 +509,18 @@ OO.ui = (() => {
   }
 
   /* ---------- 战利品 ---------- */
-  function showLoot(cards, count) {
-    return new Promise(res => {
+  let lootRes = null;
+  function closeLoot() { const m = $('#loot'); if (!m.classList.contains('hidden')) { m.classList.add('hidden'); if (lootRes) { const r = lootRes; lootRes = null; r(null); } } }
+  function showLoot(cards, count, ms) {
+    return new Promise(resolve => {
+      let done = false;
+      const res = v => { if (done) return; done = true; lootRes = null; resolve(v); };
+      lootRes = res;
       const m = $('#loot');
       m.classList.remove('hidden');
       const full = count >= 36;
-      m.innerHTML = `<div class="loot-in"><div class="lh"><div class="lt">战利品</div><div class="ls">第 ${G().round} 轮结束 · 选择一件收入背包 <span class="mut">（${count}/36${full ? ' · 背包已满，将无法获得' : ''}）</span></div></div><div class="cards"></div><button class="ghost skip">放弃</button></div>`;
+      m.innerHTML = `<div class="loot-in"><div class="lh"><div class="lt">战利品</div><div class="ls">第 ${G().round} 轮结束 · 选择一件收入背包 <span class="mut">（${count}/36${full ? ' · 背包已满，将无法获得' : ''}）</span></div>${ms ? '<div class="ltimer"><i></i></div>' : ''}</div><div class="cards"></div><button class="ghost skip">放弃</button></div>`;
+      if (ms) { const bar = m.querySelector('.ltimer i'); bar.style.transition = 'none'; bar.style.width = '100%'; requestAnimationFrame(() => { bar.style.transition = `width ${ms}ms linear`; bar.style.width = '0%'; }); }
       const box = m.querySelector('.cards');
       cards.forEach((c, i) => {
         const info = { type: c.type };
@@ -541,8 +549,13 @@ OO.ui = (() => {
   }
 
   /* ---------- 确认框 ---------- */
+  let confirmRes = null;
+  function closeConfirm() { const m = $('#confirm'); if (!m.classList.contains('hidden')) { m.classList.add('hidden'); if (confirmRes) { const r = confirmRes; confirmRes = null; r(false); } } }
   function confirm(title, body, yes = '确定', no = '取消') {
-    return new Promise(res => {
+    return new Promise(resolve => {
+      let done = false;
+      const res = v => { if (done) return; done = true; confirmRes = null; resolve(v); };
+      confirmRes = res;
       const m = $('#confirm');
       m.innerHTML = `<div class="dlg"><div class="dt">${title}</div><div class="dbody">${body}</div><div class="dbtn"><button class="gold y">${yes}</button><button class="ghost n">${no}</button></div></div>`;
       m.classList.remove('hidden');
@@ -594,7 +607,43 @@ OO.ui = (() => {
     e.querySelectorAll('[data-x]').forEach(b => b.onclick = () => { if (b.dataset.x === 'export') { exportInput(); return; } e.className = 'hidden'; OO.main.menu(b.dataset.x); });
   }
 
+  function hideEnd() { $('#end').className = 'hidden'; }
+  function showEndOnline(r, me, host) {
+    const e = $('#end');
+    const mine = me ? r.ranking.find(x => x.char === me) : null;
+    const win = mine && mine.place === 1;
+    e.className = win ? 'win' : 'lose';
+    const medal = p => p === 1 ? '🥇' : p === 2 ? '🥈' : p === 3 ? '🥉' : p;
+    e.innerHTML = `<div class="end-in">
+      <div class="et">${!me ? 'FINISH' : win ? 'VICTORY' : 'DEFEAT'}</div>
+      <div class="es">${r.winner ? `最后的站立者：${escapeHTML(OO.world.chars.get(r.winner)?.display || r.winner)}` : '所有真人玩家都已倒下'}</div>
+      <div class="rank">${r.ranking.map(x => `<div class="rk ${x.char === me ? 'me' : ''}"><span class="rp">${medal(x.place)}</span><canvas class="portrait" data-p="${x.char}" width="40" height="40"></canvas><b>${escapeHTML(OO.world.chars.get(x.char)?.display || x.name)}</b><small>${x.human ? '玩家' : 'AI'} · ${D.characters.find(c => c.id === x.char)?.title || ''}</small></div>`).join('')}</div>
+      <div class="place">共 ${r.rounds} 轮 · 执行指令 ${cmdHistory.length} 条</div>
+      <div class="dbtn">${host ? '<button class="gold" data-x="again">再来一局</button>' : '<span class="mut">等待房主发起再来一局…</span>'}<button class="ghost" data-x="export">导出整局指令</button><button class="ghost" data-x="leave">离开房间</button></div></div>`;
+    e.querySelectorAll('canvas.portrait').forEach(cv => drawPortrait(cv, cv.dataset.p));
+    e.querySelectorAll('[data-x]').forEach(b => b.onclick = () => {
+      if (b.dataset.x === 'export') exportInput();
+      else if (b.dataset.x === 'again') OO.online.again();
+      else if (b.dataset.x === 'leave') { hideEnd(); OO.online.leave(); }
+    });
+  }
+
+  /* ---------- 联机回合倒计时 ---------- */
+  let timerInfo = null;
+  function setTurnTimer(info) { timerInfo = info; tickTimer(); }
+  function tickTimer() {
+    const t = $('#turnTimer'); if (!t) return;
+    if (!timerInfo) { t.classList.add('hidden'); return; }
+    const left = Math.max(0, Math.ceil((timerInfo.ends - Date.now()) / 1000));
+    t.classList.remove('hidden');
+    t.classList.toggle('mine', !!timerInfo.mine);
+    t.classList.toggle('urgent', left <= 8);
+    t.innerHTML = `<b>${left}</b><span>${timerInfo.mine ? '你的回合' : escapeHTML(timerInfo.name)}</span>`;
+  }
+  setInterval(tickTimer, 250);
+
   return {
+    hideEnd, showEndOnline, setTurnTimer, closeLoot, closeConfirm,
     init, showHUD, setHeroTurn, setBusy, refreshHero, refreshHotbar, refreshInspect, refreshAll, refreshActions,
     buildTurnBar, setTurn, markDead, setRound, setThinking, select, log, clearLog, banner, toast, heroHit, flashSlot,
     showLoot, confirm, showEnd, toggleBag, toggleTerm, doAct, applyMute, hideTip, drawPortrait,

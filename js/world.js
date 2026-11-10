@@ -28,6 +28,7 @@ OO.world = (() => {
   let parts = [], texts = [], rings = [], slashes = [], beams = [], projs = [], bolts = [];
   let flash = { a: 0, col: '#fff' }, vignette = { red: 0 }, letterbox = 0, letterboxT = 0;
   let selected = null, activeTurn = null, hoverName = null, showPlates = true;
+  let blood = 0, bloodT = 0;   // 血月：0~1
   let bg = null, tiles = [], stars = [];
   let T = 0;
   const linkPulse = new Map(); // "A>B" → 强度
@@ -404,6 +405,28 @@ OO.world = (() => {
 
   /* ---------------- 角色 ---------------- */
   function addChar(def, snap, angle) {
+    const ch = makeChar(def, snap, angle);
+    chars.set(def.id, ch);
+    return ch;
+  }
+  /* 大厅里的角色立绘：用同一套立牌绘制，按初始装备显示 */
+  const pcache = new Map();
+  function portrait(def, cv, full = false) {
+    let ch = pcache.get(def.id);
+    if (!ch) {
+      const kit = def.kit || [];
+      const sw = kit.find(k => k[1] === 'Sword');
+      const armor = ['Helmet', 'Chestplate', 'Leggings', 'Boots'].map(t => (def.equip || []).includes(t) ? { type: t, value: 1 } : null);
+      ch = makeChar(def, { hp: 1, max: 1, shield: 0, atk: 0, alive: true, hand: sw ? { type: 'Sword', value: sw[3] } : null, armor, armorValue: 0, items: 0, subs: [] }, 0);
+      pcache.set(def.id, ch);
+    }
+    drawFigure(ch);
+    const g = cv.getContext('2d'), sp = ch.sprite, k = SPR;
+    g.clearRect(0, 0, cv.width, cv.height);
+    if (full) g.drawImage(sp, sp.width * 0.18, sp.height * 0.2, sp.width * 0.64, sp.height * 0.78, 0, 0, cv.width, cv.height);
+    else { const cx = sp.width / 2, cy = sp.height - 15 * k - 128 * k; g.drawImage(sp, cx - 35 * k, cy - 32 * k, 70 * k, 70 * k, 0, 0, cv.width, cv.height); }
+  }
+  function makeChar(def, snap, angle) {
     const sprite = document.createElement('canvas');
     const ch = {
       name: def.id, display: def.name || def.id, title: def.title || '', palette: def.palette, archetype: def.archetype,
@@ -415,7 +438,6 @@ OO.world = (() => {
       relation: 'enemy',
     };
     sprite.width = Math.round(260 * SPR); sprite.height = Math.round(330 * SPR);
-    chars.set(def.id, ch);
     return ch;
   }
   function clearChars() { chars.clear(); parts = []; texts = []; rings = []; slashes = []; beams = []; projs = []; bolts = []; selected = null; activeTurn = null; linkPulse.clear(); }
@@ -1118,6 +1140,7 @@ OO.world = (() => {
     ambient(dt);
     if (letterboxT !== letterbox) letterbox += (letterboxT - letterbox) * Math.min(1, dt * 5);
     flash.a *= Math.exp(-dt * 6);
+    blood += (bloodT - blood) * Math.min(1, dt * 0.8);
     for (const ch of chars.values()) {
       const A = ch.a;
       A.hurt = Math.max(0, A.hurt - dt * 5);
@@ -1156,7 +1179,14 @@ OO.world = (() => {
     const P = prof.on ? performance.now.bind(performance) : null;
     let t = P ? P() : 0;
     const mark = k => { if (P) { const n = P(); prof[k] = (prof[k] || 0) * 0.9 + (n - t) * 0.1; t = n; } };
-    drawSky(); mark('sky');
+    drawSky();
+    if (blood > 0.01) { // 血月：天空泛红，月亮染血
+      ctx.fillStyle = `rgba(140,8,24,${0.24 * blood})`; ctx.fillRect(0, 0, W, H);
+      const mx = W * 0.2, my = H * 0.17, mr = Math.min(W, H) * 0.075;
+      glowAt('#ff2a3a', mx, my, mr * 5, 0.45 * blood);
+      ctx.fillStyle = `rgba(210,30,40,${0.6 * blood})`; ctx.beginPath(); ctx.arc(mx, my, mr, 0, TAU); ctx.fill();
+    }
+    mark('sky');
     const v = cam.view;
     ctx.setTransform(DPR * v.z, 0, 0, DPR * v.z, DPR * v.ox, DPR * v.oy);
     drawPlatform(); mark('floor');
@@ -1203,13 +1233,14 @@ OO.world = (() => {
   }
 
   return {
-    init, update, render, perf, SPR, prof, bboxScreen, setQuality, get qualityMode() { return qMode; }, get quality() { return Q; }, get fps() { return 1 / ema; }, project, pick, screenOf, addChar, clearChars, chars, fx, shake, focusOn,
+    init, update, render, perf, SPR, prof, bboxScreen, setQuality, get qualityMode() { return qMode; }, get quality() { return Q; }, get fps() { return 1 / ema; }, project, pick, screenOf, addChar, portrait, clearChars, chars, fx, shake, focusOn,
     pulseLink, pulseChainTo, cam,
     get W() { return W; }, get H() { return H; },
     setSelected(n) { selected = n; }, set plates(v) { showPlates = v; }, get selected() { return selected; },
     setActive(n) { activeTurn = n; }, setHover(n) { hoverName = n; },
     flash(col, a) { flash.col = col; flash.a = Math.max(flash.a, a); },
     set redVignette(v) { vignette.red = v; },
+    set bloodMoon(v) { bloodT = v; if (!v) blood = 0; }, get bloodMoon() { return bloodT; },
     set letterbox(v) { letterboxT = v; },
     punch(v = 1) { cam.punch = Math.max(cam.punch, v); },
   };

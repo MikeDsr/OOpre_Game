@@ -95,4 +95,26 @@ OO.data = {
   },
 
   speeds: [1, 1.6, 2.4],
+
+  /* ---------------- 收尾机制：血月 ----------------
+     第 round 轮起（或第 minRound 轮后只剩 2 人时）降临：
+     战利品不再出治疗/护盾药剂；每轮结束时，每个存活者被迫对自己使用一瓶噬魂毒瓶，
+     伤害 = 最大体力 × (base + step × (血月第几轮 - 1))。全部通过作业指令完成。 */
+  endgame: { round: 12, minRound: 6, base: 0.08, step: 0.04 },
+
+  /* ---------------- 联机 ---------------- */
+  net: {
+    // 网页不是由 Worker 托管时（例如 GitHub Pages），连接这个地址；部署后改成你的 Worker 域名
+    server: 'https://oath-arena.kathiedesorcy28.workers.dev',
+    turnSec: 40,      // 每回合思考时间
+    lootSec: 25,      // 战利品选择时间
+    pactSec: 20,      // 回应誓约邀请的时间
+    minSeats: 3, maxSeats: 6,
+  },
 };
+
+/* 联机可选角色：6 名角色各不相同，最多 6 人同场 */
+OO.data.characters = [
+  Object.assign({}, OO.data.hero, { id: 'Aurel', name: '奥瑞尔', title: '誓约骑士', ai: { aggro: 0.6, potionLove: 0.5, loyalty: 0.6, heal: 0.5 } }),
+  ...OO.data.rivals,
+];

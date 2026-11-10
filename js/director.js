@@ -146,7 +146,29 @@ OO.director = (() => {
     if (handDur) setSnap(ev.attacker, handDur.snap);
   }
 
+  async function doCurse(ev, q) {
+    const c = ch(ev.target); if (!c) return;
+    const follow = q.takeUntil(e => e.type === 'damage' && e.target === ev.target);
+    const dmg = follow.find(e => e.type === 'damage');
+    W().focusOn([ev.target], 1.08);
+    const p = chest(ev.target, 100);
+    A('throwP', { pan: panOf(ev.target) });
+    W().fx.beam(ev.target, '#ff2a3a', { life: 0.9, w: 34, h: 900 });
+    W().fx.bolt({ x: p.x + 40, y: 900, z: p.z }, p, '#ff4050');
+    await U.wait(0.18);
+    A('magic', { pan: panOf(ev.target) }); A('impact', { pan: panOf(ev.target), power: 0.7 });
+    W().fx.spark(p.x, p.y, p.z, { col: '#ff3040', n: 40, max: 380 });
+    W().fx.ring(c.pos.x, c.pos.z, '#ff2a3a', { r1: 180, w: 10 });
+    if (dmg) hitFeedback(dmg, { magic: true, sub: '血月侵蚀' });
+    await U.wait(0.5);
+    const rest = q.takeUntil(e => e.type === 'used');
+    const used = rest.find(e => e.type === 'used');
+    if (used) { setSnap(ev.target, used.snap); setSnap(ev.user, used.userSnap); }
+    q.unshift(rest.filter(e => e.type !== 'used'));
+  }
+
   async function doUse(ev, q) {
+    if (ev.item.id.startsWith('curse_')) return doCurse(ev, q);
     const user = ch(ev.user), tgt = ch(ev.target); if (!user || !tgt) return;
     const type = ev.item.type, self = ev.user === ev.target;
     const pan = panOf(ev.user);
@@ -300,7 +322,7 @@ OO.director = (() => {
 
   async function doItemAdded(ev, quiet) {
     setSnap(ev.player, ev.snap);
-    if (quiet) return;
+    if (quiet || ev.item.id.startsWith('curse_')) return;
     const c = ch(ev.player); if (!c) return;
     A('beam', { pan: panOf(ev.player) });
     W().fx.beam(ev.player, D.items[ev.item.type].glow, { life: 0.9, w: 26 });
