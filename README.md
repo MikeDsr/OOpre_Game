@@ -27,16 +27,9 @@ npm run dev
 
 打开 http://localhost:8787 。开几个浏览器窗口就能互相加入房间。
 
-### 部署到 Cloudflare（免费计划即可）
+### 游戏网址
 
-```bash
-npx wrangler login
-npm run deploy
-```
-
-部署完成后会输出 `https://oath-arena.<你的子域>.workers.dev`。这个地址同时托管网页和联机服务。如果国内访问 `workers.dev` 不稳定，可以在 `wrangler.jsonc` 里给 Worker 绑定你自己在 Cloudflare 上托管的域名。
-
-如果还想从 GitHub Pages 打开网页，把 `js/data.js` 里的 `net.server` 改成上面的 Worker 地址即可。
+https://mikedsr.github.io/OOpre_Game/
 
 ### 联机测试工具
 
