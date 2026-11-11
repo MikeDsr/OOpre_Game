@@ -6,7 +6,14 @@
 'use strict';
 OO.net = (() => {
   let ws = null, base = null, code = null, name = '', create = false;
-  let handlers = {}, wantOpen = false, retry = 0, retryTimer = 0;
+  let handlers = {}, wantOpen = false, retry = 0, retryTimer = 0, lastMsg = 0;
+  // 心跳：每 15 秒 ping 一次；40 秒没收到服务器任何消息就判定半断开，主动重连
+  setInterval(() => {
+    if (!ws || ws.readyState !== 1) return;
+    send({ t: 'ping' });
+    // 后台标签页的定时器会被浏览器降频，只在前台判定，避免误判
+    if (!document.hidden && Date.now() - lastMsg > 45000) { try { ws.close(); } catch (e) { } }
+  }, 15000);
 
   async function server() {
     if (base) return base;
@@ -40,13 +47,15 @@ OO.net = (() => {
     emit('status', { state: retry ? 'reconnecting' : 'connecting' });
     sock.onopen = () => {
       if (sock !== ws) return;
-      retry = 0;
+      retry = 0; lastMsg = Date.now();
       emit('status', { state: 'open' });
       send({ t: 'hello', name, pid: pidOf(code) });
     };
     sock.onmessage = e => {
       if (sock !== ws) return;
+      lastMsg = Date.now();
       let m; try { m = JSON.parse(e.data); } catch (err) { return; }
+      if (m.t === 'pong') return;
       if (m.t === 'welcome') { if (m.pid) savePid(code, m.pid); create = false; }
       if (m.t === 'err') wantOpen = false;
       emit(m.t, m);

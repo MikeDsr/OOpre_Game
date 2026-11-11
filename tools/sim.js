@@ -9,6 +9,7 @@ for (const f of ['engine.js', 'data.js', 'util.js', 'ai.js', 'game.js']) vm.runI
 const OO = ctx.OO, U = OO.U, D = OO.data;
 
 const N = +process.argv[2] || 300, OPP = +process.argv[3] || 4;
+const dmg = { phys: [], magic: [] };
 const agg = { blood: 0, rounds: [], heroWin: 0, heroPlace: [], aids: 0, deaths: 0, cmds: 0, duels: 0, winners: {}, errors: 0, maxRound: 0, fullInv: 0, broken: 0 };
 
 for (let g = 0; g < N; g++) {
@@ -17,7 +18,9 @@ for (let g = 0; g < N; g++) {
   const hero = Object.assign({}, D.hero, { id: 'Hero', ai: { aggro: 0.6, potionLove: 0.5, loyalty: 0.5, heal: 0.5 } });
   const roster = [hero, ...U.shuffle(D.rivals.slice()).slice(0, OPP)];
   let idc = 0;
-  const run = c => { agg.cmds++; const r = sys.execute(c); for (const e of r.events) { if (e.type === 'aid') agg.aids++; if (e.type === 'death') agg.deaths++; if (e.type === 'attack') grudges.set(e.target + '>' + e.attacker, (grudges.get(e.target + '>' + e.attacker) || 0) + 1); if (e.type === 'inventoryFull') agg.fullInv++; if (e.type === 'durability' && e.broken) agg.broken++; } return r; };
+  const run = c => { agg.cmds++; const r = sys.execute(c); for (const e of r.events) {
+      if (e.type === 'attack') { const t = sys.findPlayer(e.target); dmg.phys.push([e.damage, e.damage / t.getMaxHitPoint(), round]); }
+      if (e.type === 'use' && e.item.type === 'DamagePotion' && !e.item.id.startsWith('curse_')) { const t = sys.findPlayer(e.target); dmg.magic.push([e.item.amp, e.item.amp / t.getMaxHitPoint(), round]); } if (e.type === 'aid') agg.aids++; if (e.type === 'death') agg.deaths++; if (e.type === 'attack') grudges.set(e.target + '>' + e.attacker, (grudges.get(e.target + '>' + e.attacker) || 0) + 1); if (e.type === 'inventoryFull') agg.fullInv++; if (e.type === 'durability' && e.broken) agg.broken++; } return r; };
   const itemCmd = (o, s) => { const id = `${s[2]}_${++idc}`; return s[0] === 'potion' ? `add_potion ${o} ${id} ${s[1]} ${s[3]}` : `add_equipment ${o} ${id} ${s[1]} ${s[3]} ${s[4]}`; };
   for (const d of roster) { defs.set(d.id, d); run(`add_player ${d.id} ${d.hp} ${d.max} ${d.shield} ${d.atk}`); }
   for (const d of roster) {
@@ -73,3 +76,10 @@ console.log(`主角(AI 操作)胜率 ${(agg.heroWin / N * 100).toFixed(1)}%，�
 console.log('胜者分布', agg.winners);
 console.log(`血月触发 ${(agg.blood / N * 100).toFixed(0)}% 的对局`);
 console.log(`每局：援助 ${(agg.aids / N).toFixed(1)} 次，装备碎裂 ${(agg.broken / N).toFixed(1)} 次，背包满 ${(agg.fullInv / N).toFixed(1)} 次，指令 ${(agg.cmds / N).toFixed(0)} 条；最终决战触发 ${agg.duels} 次；异常 ${agg.errors}`);
+
+const pct = (a, q) => { const b = a.slice().sort((x, y) => x - y); return b[Math.min(b.length - 1, Math.floor(b.length * q))]; };
+for (const k of ['phys', 'magic']) {
+  const v = dmg[k].map(x => x[0]), r = dmg[k].map(x => x[1]);
+  const late = dmg[k].filter(x => x[2] >= 8).map(x => x[0]);
+  console.log(`${k === 'phys' ? '物理攻击' : '毒瓶'}：中位 ${pct(v, .5)}，90% ${pct(v, .9)}，99% ${pct(v, .99)}，最大 ${Math.max(...v)}；占对方最大体力 中位 ${(pct(r, .5) * 100).toFixed(0)}%，90% ${(pct(r, .9) * 100).toFixed(0)}%；≥100% 的比例 ${(r.filter(x => x >= 1).length / r.length * 100).toFixed(1)}%；第8轮后中位 ${pct(late, .5)}，90% ${pct(late, .9)}`);
+}

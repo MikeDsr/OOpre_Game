@@ -933,6 +933,7 @@ OO.world = (() => {
       beams.push({ x: ch.pos.x, z: ch.pos.z, col, t: 0, life: o.life || 1.1, w: o.w || 46, h: o.h || 520 });
     },
     projectile(o) { // {from:{x,y,z}, to:{x,y,z}, dur, arc, kind:'flask'|'orb', type, col}
+      if (U.instant) return Promise.resolve();
       return new Promise(res => { projs.push(Object.assign({ t: 0, res, trail: [] }, o)); });
     },
     bolt(from, to, col) { bolts.push({ from, to, col, t: 0, life: 0.35, seed: Math.random() }); },
@@ -1243,5 +1244,6 @@ OO.world = (() => {
     set bloodMoon(v) { bloodT = v; if (!v) blood = 0; }, get bloodMoon() { return bloodT; },
     set letterbox(v) { letterboxT = v; },
     punch(v = 1) { cam.punch = Math.max(cam.punch, v); },
+    flushFX() { while (projs.length) projs.pop().res(); },
   };
 })();

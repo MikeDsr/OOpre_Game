@@ -126,7 +126,14 @@ OO.online = (() => {
     if (s.state === 'error') { status(s.msg, true); OO.ui.toast(s.msg, 'red'); }
     else if (s.state === 'reconnecting' && st.phase !== 'lobby') OO.ui.toast('连接中断，正在重连…', 'red');
   });
-  net.on('err', m => { status(m.msg, true); OO.ui.toast(m.msg, 'red'); });
+  net.on('err', m => {
+    status(m.msg, true);
+    if (st.phase === 'playing' || st.phase === 'lobby' && st.lobby) {
+      OO.ui.closeLoot(); OO.ui.closeConfirm();
+      OO.ui.confirm('房间已失效', `${m.msg}。<br><span class="mut">服务器更新或长时间无人时房间会被回收，请回到标题重新创建房间。</span>`, '返回标题', '留在此处')
+        .then(ok => { if (ok) leave(); });
+    } else OO.ui.toast(m.msg, 'red');
+  });
   net.on('welcome', m => {
     st.pid = m.pid; st.spectator = !!m.spectator; st.code = m.code;
     try { history.replaceState(null, '', location.pathname + '?room=' + m.code); } catch (e) { }
@@ -146,7 +153,14 @@ OO.online = (() => {
     } else if (!$('#lobby').classList.contains('hidden')) renderRoom();
   });
   ['start', 'sync', 'batch', 'turn', 'round', 'over'].forEach(t => net.on(t, m => push(m)));
-  net.on('fx', m => { if (m.kind === 'toast') OO.ui.toast(m.text, 'gold'); else if (m.kind === 'emote') emote(m); else push(m); });
+  net.on('fx', m => {
+    if (m.kind === 'toast') OO.ui.toast(m.text, 'gold');
+    else if (m.kind === 'emote') emote(m);
+    else if (m.kind === 'lag') OO.ui.toast(`等待 ${m.names.join('、')} 同步画面…`, '');
+    else if (m.kind === 'lootwait') OO.ui.toast(`等待 ${m.names.join('、')} 选择战利品…`, '');
+    else if (m.kind === 'afk') onAfk(m);
+    else push(m);
+  });
   net.on('loot', m => push(m));
   net.on('lootEnd', () => OO.ui.closeLoot());
   net.on('pactAsk', m => {
@@ -212,6 +226,13 @@ OO.online = (() => {
   }
 
   async function playBatch(m) {
+    try { await playBatchInner(m); } catch (e) { console.error('批次演出出错', e); }
+    finally {
+      if (isMe(m.actor) && m.tag !== 'free') st.busy = false;
+      net.send({ t: 'idle', seq: m.seq });
+    }
+  }
+  async function playBatchInner(m) {
     const actor = m.actor;
     if (m.tag === 'setup') {
       for (const c of m.cmds) await OO.game.execQuiet(c);
@@ -231,8 +252,6 @@ OO.online = (() => {
       }
       if (m.tag === 'ai') OO.ui.setThinking(null);
     }
-    if (isMe(actor) && m.tag !== 'free') st.busy = false;
-    net.send({ t: 'idle', seq: m.seq });
   }
 
   function onTurn(m) {
@@ -263,6 +282,15 @@ OO.online = (() => {
       case 'timeout': W.fx.text(m.who, '超时', { col: '#ff9a9a', size: 22, kind: 'label', y: 210, sub: '本回合跳过' }); if (isMe(m.who)) { st.myTurn = false; OO.ui.setHeroTurn(false); } await U.wait(0.4); break;
     }
   }
+  function onAfk(m) {
+    if (isMe(m.who)) {
+      if (m.on) {
+        st.myTurn = false; OO.ui.setHeroTurn(false);
+        OO.ui.confirm('你已暂离', '连续两次回合超时，AI 正在替你行动。<br><span class="mut">点“我回来了”立即恢复操作。</span>', '我回来了', '继续托管')
+          .then(ok => { if (ok) net.send({ t: 'back' }); });
+      } else OO.ui.toast('欢迎回来，已恢复你的操作', 'gold');
+    } else OO.ui.toast(m.on ? `${m.name} 暂离，由 AI 托管` : `${m.name} 回来了`, m.on ? '' : 'gold');
+  }
   function emote(m) { OO.world.fx.text(m.who, m.text, { col: '#ffffff', size: 22, kind: 'label', y: 240, rise: 30, life: 2.2 }); A('hover'); }
 
   async function onOver(r) {
@@ -284,13 +312,19 @@ OO.online = (() => {
   function act(kind, arg = {}) {
     if (!st.myTurn || st.busy) { A('error'); return false; }
     if (FREE.has(kind)) { net.send({ t: 'act', kind, arg }); A(kind === 'slot' ? 'slot' : 'swap'); return true; }
+    if (!net.send({ t: 'act', kind, arg })) { OO.ui.toast('连接中断，正在重连…', 'red'); A('error'); return false; }
     st.busy = true; st.myTurn = false;
     OO.ui.setHeroTurn(false);
     OO.ui.setTurnTimer(null);
-    net.send({ t: 'act', kind, arg });
     return true;
   }
   function again() { net.send({ t: 'again' }); }
+
+  document.addEventListener('visibilitychange', () => {
+    const bg = document.hidden && st.active && st.phase === 'playing';
+    OO.U.instant = bg;
+    if (bg) { OO.U.clearTweens(); OO.world.flushFX(); OO.U.time.freeze = 0; OO.U.time.slowmo = 1; }
+  });
 
   function esc(s) { return String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
 

@@ -391,7 +391,9 @@ OO.game = (() => {
     const rng = ([a, b]) => U.randi(a, b);
     let spec;
     if (D.potionTypes.includes(type)) {
-      const amp = U.clamp(Math.round(rng(D.loot.potion[type]) * (type === 'StrengthPotion' ? Math.sqrt(g) : g)), 1, 5000);
+      const sq = type === 'StrengthPotion' || type === 'DamagePotion'; // 力量与毒瓶按开方成长
+      const cap = type === 'DamagePotion' ? D.loot.damageCap : 5000;
+      const amp = U.clamp(Math.round(rng(D.loot.potion[type]) * (sq ? Math.sqrt(g) : g)), 1, cap);
       spec = ['potion', type, { HealPotion: 'heal', AbsorptionPotion: 'shield', DamagePotion: 'venom', StrengthPotion: 'rage' }[type], amp];
     } else if (type === 'Sword') {
       spec = ['equipment', type, 'sword', U.clamp(Math.round(rng(D.loot.sword.value) * g), 0, 200000), U.clamp(Math.round(rng(D.loot.sword.dur) * Math.sqrt(g)), 1, 200000)];

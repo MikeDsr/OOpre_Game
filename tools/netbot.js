@@ -19,7 +19,7 @@ function bot(i) {
   return new Promise((resolve, reject) => {
     const host = i === 0;
     const ws = new WebSocket(SERVER.replace(/^http/, 'ws') + '/ws/' + CODE + (host ? '?create=1' : ''));
-    const me = { i, pid: null, char: null, sys: new OO.GameSystem(), out: [], turns: 0, acts: {}, result: null, lobby: null };
+    const me = { i, pid: null, char: null, sys: new OO.GameSystem(), out: [], turns: 0, fx: {}, acts: {}, result: null, lobby: null };
     const send = o => ws.send(JSON.stringify(o));
     ws.onopen = () => send({ t: 'hello', name: 'Bot' + i });
     ws.onerror = e => reject(e);
@@ -42,12 +42,15 @@ function bot(i) {
         case 'start': me.char = m.roster.find(r => r.pid === me.pid).char; me.roster = m.roster; break;
         case 'batch':
           for (const c of m.cmds) me.out.push(...me.sys.execute(c).lines);
-          send({ t: 'idle', seq: m.seq });
+          // LAG=1：1 号机器人像“切到后台的旧客户端”一样，从不回报演出完成
+          if (!(process.env.LAG && i === 1)) send({ t: 'idle', seq: m.seq });
           break;
+        case 'fx': me.fx[m.kind] = (me.fx[m.kind] || 0) + 1; break;
         case 'turn':
           if (host && process.env.V) process.stdout.write(' ' + m.who + (m.ai ? '(AI)' : ''));
           if (m.who === me.char) {
             me.turns++;
+            if (process.env.AFK && i === 1) break; // AFK=1：1 号机器人挂机不操作
             await sleep(30);
             const P = me.sys.findPlayer(me.char);
             const foes = me.sys.playerList.filter(p => p !== P && !p.isDead());
@@ -85,7 +88,7 @@ function bot(i) {
   const same = bots.every(b => b.out.join('\n') === ref);
   console.log(`用时 ${((Date.now() - t0) / 1000).toFixed(1)}s，共 ${bots[0].result.rounds} 轮，输出 ${bots[0].out.length} 行`);
   console.log('排名', bots[0].result.ranking.map(r => `${r.place}.${r.char}${r.human ? '(人)' : ''}`).join('  '));
-  bots.forEach(b => console.log(`  Bot${b.i} 操作 ${b.char}：回合 ${b.turns}，动作 ${JSON.stringify(b.acts)}`));
+  bots.forEach(b => console.log(`  Bot${b.i} 操作 ${b.char}：回合 ${b.turns}，动作 ${JSON.stringify(b.acts)}，提示 ${JSON.stringify(b.fx)}`));
   let h = 0; for (const ch of ref) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
   console.log('输出指纹', bots[0].out.length, h);
   console.log(same ? '✔ 所有客户端重放结果完全一致' : '✘ 客户端状态不一致！');

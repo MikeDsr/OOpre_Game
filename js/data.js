@@ -34,7 +34,8 @@ OO.data = {
   loot: {
     growth: 0.09,
     weights: { HealPotion: 13, AbsorptionPotion: 10, DamagePotion: 17, StrengthPotion: 13, Sword: 15, Helmet: 6, Chestplate: 6, Leggings: 6, Boots: 6 },
-    potion: { HealPotion: [170, 270], AbsorptionPotion: [120, 200], DamagePotion: [190, 300], StrengthPotion: [18, 32] },
+    potion: { HealPotion: [170, 270], AbsorptionPotion: [120, 200], DamagePotion: [170, 250], StrengthPotion: [18, 32] },
+    damageCap: 460,   // 毒瓶伤害上限：魔法伤害无视护甲，必须封顶，避免一发秒杀
     sword: { value: [18, 34], dur: [700, 1300] },
     armor: { value: [3, 6], dur: [900, 1700] },
   },
@@ -100,7 +101,7 @@ OO.data = {
      第 round 轮起（或第 minRound 轮后只剩 2 人时）降临：
      战利品不再出治疗/护盾药剂；每轮结束时，每个存活者被迫对自己使用一瓶噬魂毒瓶，
      伤害 = 最大体力 × (base + step × (血月第几轮 - 1))。全部通过作业指令完成。 */
-  endgame: { round: 12, minRound: 6, base: 0.08, step: 0.04 },
+  endgame: { round: 10, minRound: 6, base: 0.08, step: 0.04 },
 
   /* ---------------- 联机 ---------------- */
   net: {

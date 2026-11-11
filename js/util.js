@@ -32,7 +32,9 @@ OO.U = (() => {
 
   /* 补间：每帧由 main 调用 U.tick(dt) */
   const tweens = [];
+  U.instant = false; // 联机且标签页在后台时为 true：所有演出立即完成，不拖累其他玩家
   U.tween = (dur, fn, ease = U.ease.inOutQuad) => new Promise(res => {
+    if (U.instant) { try { fn(1, 1); } catch (e) { console.error(e); } res(); return; }
     tweens.push({ t: 0, dur: Math.max(dur, 0.0001), fn, ease, res });
   });
   U.wait = dur => U.tween(dur, () => {});
@@ -45,7 +47,7 @@ OO.U = (() => {
       if (k >= 1) { tweens.splice(i, 1); tw.res(); }
     }
   };
-  U.clearTweens = () => { while (tweens.length) tweens.pop().res(); };
+  U.clearTweens = () => { while (tweens.length) { const tw = tweens.pop(); try { tw.fn(1, 1); } catch (e) { } tw.res(); } };
 
   U.fmt = n => Math.round(n).toLocaleString('en-US');
   U.norm = hex => { let h = hex.replace('#', ''); if (h.length === 3) h = h.split('').map(c => c + c).join(''); return h; };
