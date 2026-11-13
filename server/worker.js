@@ -562,9 +562,20 @@ export class Room extends DurableObject {
       const cards = [0, 1, 2].map(() => { const it = OO.game.rollItem(this.round, true, !!this.bloodSince); return { type: it.type, spec: it.spec, rarity: it.rarity, preview: this.itemCmd(r.char, it.spec) }; });
       const ends = Date.now() + ms;
       waits.push(new Promise(resolve => {
-        const done = i => { this.lootPending.delete(r.pid); picks.set(r.char, i == null ? null : cards[i].preview); resolve(); };
-        this.lootPending.set(r.pid, { cards, ends, resolve: done });
-        setTimeout(() => this.lootPending.has(r.pid) && done(null), ms);
+        // 每个条目只结算自己：超时计时器在选完后立即取消，且只认本轮的条目。
+        // （旧写法用 lootPending.has(pid) 判断，上一轮未取消的计时器会在下一轮误删新条目，导致永久等待）
+        const entry = { cards, ends, settled: false };
+        const done = i => {
+          if (entry.settled) return;
+          entry.settled = true;
+          clearTimeout(entry.timer);
+          if (this.lootPending.get(r.pid) === entry) this.lootPending.delete(r.pid);
+          picks.set(r.char, i == null ? null : cards[i].preview);
+          resolve();
+        };
+        entry.resolve = done;
+        entry.timer = setTimeout(() => done(null), ms);
+        this.lootPending.set(r.pid, entry);
       }));
       this.send(this.connOf(r.pid), { t: 'loot', cards, ms, round: this.round, count: pl.getItemCount() });
     }
@@ -575,7 +586,17 @@ export class Room extends DurableObject {
     }, 6000);
     const lt0 = Date.now();
     this.trace('lootStart', { waiting: [...this.lootPending.keys()].map(pid => this.nameOf(pid)) });
-    await Promise.all(waits);
+    // 保险：无论发生什么，整个战利品阶段最多等 ms + 5 秒
+    let guard;
+    const timedOut = await Promise.race([
+      Promise.all(waits).then(() => false),
+      new Promise(res => { guard = setTimeout(() => res(true), ms + 5000); }),
+    ]);
+    clearTimeout(guard);
+    if (timedOut) {
+      this.trace('lootGuard', { pending: [...this.lootPending.keys()].map(pid => this.nameOf(pid)) });
+      for (const e of [...this.lootPending.values()]) e.resolve(null);
+    }
     clearTimeout(nag);
     this.trace('lootPicked', { ms: Date.now() - lt0, picks: [...picks.entries()].map(([c, v]) => c + ':' + (v ? 'ok' : 'none')) });
     if (gen !== this.gen) return;

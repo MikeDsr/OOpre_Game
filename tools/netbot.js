@@ -69,7 +69,7 @@ function bot(i) {
             send({ t: 'act', kind, arg });
           }
           break;
-        case 'loot': await sleep(50); send({ t: 'lootPick', i: OO.U.randi(0, 2) }); break;
+        case 'loot': await sleep(process.env.LOOTDELAY ? 3000 + Math.random() * 3000 : 50); send({ t: 'lootPick', i: OO.U.randi(0, 2) }); break; // LOOTDELAY=1：像真人一样想 3–6 秒再选
         case 'pactAsk': send({ t: 'pactReply', ok: Math.random() < 0.6 }); break;
         case 'over': me.result = m; if (!process.env.WAIT) ws.close(); resolve(me); break;
       }
