@@ -28,7 +28,7 @@ function bot(i) {
       switch (m.t) {
         case 'err': reject(new Error(m.msg)); break;
         case 'round': if (host && process.env.V) console.log('  第', m.round, '轮'); break;
-        case 'welcome': me.pid = m.pid; break;
+        case 'welcome': me.pid = m.pid; if (host) globalThis.__hostReady = true; break;
         case 'lobby': {
           me.lobby = m;
           if (m.phase !== 'lobby') break;
@@ -51,6 +51,7 @@ function bot(i) {
           if (m.who === me.char) {
             me.turns++;
             if (process.env.AFK && i === 1) break; // AFK=1：1 号机器人挂机不操作
+            if (process.env.THINK) await sleep(3000 + Math.random() * 9000); // THINK=1：模拟真人思考 3–12 秒
             await sleep(30);
             const P = me.sys.findPlayer(me.char);
             const foes = me.sys.playerList.filter(p => p !== P && !p.isDead());
@@ -80,7 +81,7 @@ function bot(i) {
   console.log(`房间 ${CODE}：${HUMANS} 个机器人玩家，共 ${SEATS} 个座位`);
   const t0 = Date.now();
   const first = bot(0);
-  await sleep(400);
+  for (let t = 0; t < 600 && !globalThis.__hostReady; t++) await sleep(100); // 等房间真正建好
   const rest = [];
   for (let i = 1; i < HUMANS; i++) { rest.push(bot(i)); await sleep(150); }
   const bots = await Promise.race([Promise.all([first, ...rest]), sleep(420000).then(() => { throw new Error('超时：4 分钟内没打完'); })]);

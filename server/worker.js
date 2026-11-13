@@ -46,11 +46,14 @@ export class Room extends DurableObject {
     this.conns = new Set();       // { ws, pid }
     this.players = [];            // 人类玩家 { pid, name, char, online, host }
     this.seats = 4;
+    this.monitors = new Set();
+    this.bornAt = Date.now();
     this.resetMatch();
+    this.trace('ctor', {}); // 如果对局中途出现新的 ctor，说明房间进程被 Cloudflare 重启过
     // 心跳巡检：超过 75 秒没有任何消息的连接视为半断开，主动关闭（客户端会自动重连）
     this.sweeper = setInterval(() => {
       const now = Date.now();
-      for (const c of [...this.conns]) if (now - (c.last || 0) > 75000) { try { c.ws.close(4008, 'stale'); } catch (e) { } this.onClose(c); }
+      for (const c of [...this.conns]) if (now - (c.last || 0) > 75000) { this.trace('stale', { name: this.nameOf(c.pid) }); try { c.ws.close(4008, 'stale'); } catch (e) { } this.onClose(c); }
     }, 15000);
   }
 
@@ -78,6 +81,16 @@ export class Room extends DurableObject {
       this.code = code;
     }
     const conn = { ws: server, pid: null, last: Date.now() };
+    if (url.searchParams.get('monitor') === '1') { // 只读监控：不占座位、不参与等待，只接收广播与黑匣子日志
+      conn.monitor = true;
+      this.monitors.add(conn);
+      server.addEventListener('message', e => { if (e.data === 'ping') { conn.last = Date.now(); try { server.send('{"t":"pong"}'); } catch (err) { } } });
+      const gone = () => { this.monitors.delete(conn); };
+      server.addEventListener('close', gone); server.addEventListener('error', gone);
+      this.trace('monitor', { players: this.players.map(p => ({ name: p.name, char: p.char, online: p.online, afk: !!p.afk })), phase: this.phase, uptimeSec: Math.round((Date.now() - this.bornAt) / 1000) });
+      if (this.phase !== 'lobby') this.sendSync(conn);
+      return new Response(null, { status: 101, webSocket: client });
+    }
     this.conns.add(conn);
     server.addEventListener('message', e => this.onMessage(conn, e.data));
     const bye = () => this.onClose(conn);
@@ -86,20 +99,34 @@ export class Room extends DurableObject {
     return new Response(null, { status: 101, webSocket: client });
   }
 
+  /* 黑匣子：关键节点打点。写入 Workers 日志，并实时推给只读监控端 */
+  trace(e, data = {}) {
+    const o = Object.assign({ t: 'log', at: Date.now(), room: this.code, e, round: this.round, turn: this.turn, seq: this.seq }, data);
+    try { console.log(JSON.stringify(o)); } catch (err) { }
+    if (this.monitors && this.monitors.size) { const s = JSON.stringify(o); for (const m of this.monitors) { try { m.ws.send(s); } catch (err) { } } }
+  }
+  nameOf(pid) { const p = pid && this.playerOf(pid); return p ? p.name : null; }
+
   send(conn, msg) { try { conn.ws.send(JSON.stringify(msg)); } catch (e) { /* 已断开 */ } }
-  broadcast(msg) { const s = JSON.stringify(msg); for (const c of this.conns) { try { c.ws.send(s); } catch (e) { } } }
+  broadcast(msg) {
+    const s = JSON.stringify(msg);
+    for (const c of this.conns) { try { c.ws.send(s); } catch (e) { } }
+    for (const m of this.monitors) { try { m.ws.send(s); } catch (e) { } }
+  }
   connOf(pid) { for (const c of this.conns) if (c.pid === pid) return c; return null; }
   playerOf(pid) { return this.players.find(p => p.pid === pid); }
   seatOfChar(char) { return this.roster.find(r => r.char === char); }
   humanOnline(char) { const s = this.seatOfChar(char); if (!s || !s.pid) return false; const p = this.playerOf(s.pid); return !!(p && p.online && !p.afk); }
   setAfk(p, on) {
     if (!!p.afk === on) return;
+    this.trace('afk', { name: p.name, on });
     p.afk = on; p.misses = 0;
     this.broadcast({ t: 'fx', kind: 'afk', who: p.char, on, name: p.name });
   }
 
   onClose(conn) {
     if (!this.conns.delete(conn)) return;
+    this.trace('close', { name: this.nameOf(conn.pid), idleAck: this.idle.get(conn.pid) || 0, silentSec: Math.round((Date.now() - (conn.last || 0)) / 1000) });
     const p = conn.pid && this.playerOf(conn.pid);
     if (p && !this.connOf(p.pid)) {
       p.online = false;
@@ -139,6 +166,7 @@ export class Room extends DurableObject {
         case 'back': this.setAfk(p, false); return;
         case 'lootPick': { const lp = this.lootPending.get(p.pid); if (lp) lp.resolve(Number.isInteger(m.i) && m.i >= 0 && m.i < lp.cards.length ? m.i : null); return; }
         case 'pactReply': if (this.pactPending && this.pactPending.to === p.char) this.pactPending.resolve(!!m.ok); return;
+        case 'diag': this.trace('diag', { name: p.name, d: m.d }); return;
         case 'emote': this.broadcast({ t: 'fx', kind: 'emote', who: p.char, text: clean(m.text, 16) }); return;
       }
     } catch (e) { console.error('消息处理出错', e); }
@@ -147,6 +175,7 @@ export class Room extends DurableObject {
   onHello(conn, m) {
     const name = clean(m.name) || '无名者';
     let p = m.pid && this.playerOf(String(m.pid));
+    this.trace('hello', { name, reconnect: !!p, phase: this.phase });
     if (p) { // 重连
       const old = this.connOf(p.pid); if (old && old !== conn) { this.conns.delete(old); try { old.ws.close(4001, 'replaced'); } catch (e) { } }
       conn.pid = p.pid; p.online = true;
@@ -214,8 +243,11 @@ export class Room extends DurableObject {
     return new Promise(resolve => {
       if (this.idleWaiter) this.finishIdle();
       this.idleWaiter = { seq, resolve };
+      const t0 = Date.now();
       this.idleTimer = setTimeout(() => {
-        for (const c of this.behind(seq)) this.slow.set(c.pid, (this.slow.get(c.pid) || 0) + 1);
+        const late = this.behind(seq);
+        for (const c of late) this.slow.set(c.pid, (this.slow.get(c.pid) || 0) + 1);
+        this.trace('idleCap', { batch: seq, waitedMs: Date.now() - t0, behind: late.map(c => ({ name: this.nameOf(c.pid), ack: this.idle.get(c.pid) || 0, strikes: this.slow.get(c.pid) })) });
         this.finishIdle();
       }, cap);
       this.lagTimer = setTimeout(() => {
@@ -299,6 +331,7 @@ export class Room extends DurableObject {
         if (![...this.conns].some(c => c.pid)) { this.resetMatch(); this.pushLobby(); return; }
       }
       this.round++;
+      this.trace('round', { alive: this.sys.playerList.filter(x => !x.isDead()).map(x => x.name), online: this.players.filter(x => x.online).map(x => x.name) });
       this.broadcast({ t: 'round', round: this.round });
       await sleep(900);
       for (const pl of this.sys.playerList.slice()) {
@@ -319,7 +352,7 @@ export class Room extends DurableObject {
   }
 
   async safe(label, fn) {
-    try { await fn(); } catch (e) { console.error(`${label} 出错，已跳过`, e); this.broadcast({ t: 'fx', kind: 'toast', text: `服务器跳过了一步异常（${label}）` }); }
+    try { await fn(); } catch (e) { console.error(`${label} 出错，已跳过`, e); this.trace('error', { label, msg: String(e && e.stack || e).slice(0, 600) }); this.broadcast({ t: 'fx', kind: 'toast', text: `服务器跳过了一步异常（${label}）` }); }
   }
 
   api() {
@@ -342,12 +375,16 @@ export class Room extends DurableObject {
     const ms = human ? NET.turnSec * 1000 : 0;
     this.turnEnds = Date.now() + ms;
     this.broadcast({ t: 'turn', who: n, ms, ai: !human, round: this.round });
+    const t0 = Date.now();
+    this.trace('turn', { who: n, ai: !human });
     if (!human) {
       await sleep(450);
       if (gen !== this.gen) return;
       const plan = OO.ai.decide(this.sys, pl, this.api());
       const seq = this.run(plan.steps, n, 'ai', { label: plan.label });
+      this.trace('aiPlan', { who: n, label: plan.label, steps: plan.steps.length, batch: seq });
       await this.waitIdle(seq);
+      this.trace('turnEnd', { who: n, how: 'ai', ms: Date.now() - t0 });
       return;
     }
     // 等真人行动：主动作结束回合；免费动作在 onAct 里直接执行
@@ -356,6 +393,7 @@ export class Room extends DurableObject {
       this.turnTimer = setTimeout(() => resolve({ timeout: true }), ms);
     });
     clearTimeout(this.turnTimer); this.turnWaiter = null;
+    this.trace('turnEnd', { who: n, how: res.timeout ? 'timeout' : res.ai ? 'disconnect→ai' : 'act', ms: Date.now() - t0 });
     if (gen !== this.gen) return;
     if (res.timeout) {
       this.broadcast({ t: 'fx', kind: 'timeout', who: n });
@@ -373,7 +411,11 @@ export class Room extends DurableObject {
 
   /* 真人的动作请求 */
   async onAct(p, kind, arg) {
-    if (this.phase !== 'playing' || !p.char || this.turn !== p.char || !this.turnWaiter || this.turnWaiter.busy) return;
+    if (this.phase !== 'playing' || !p.char || this.turn !== p.char || !this.turnWaiter || this.turnWaiter.busy) {
+      this.trace('actIgnored', { name: p.name, kind, why: this.phase !== 'playing' ? 'phase' : this.turn !== p.char ? 'notYourTurn' : !this.turnWaiter ? 'noWaiter' : 'busy' });
+      return;
+    }
+    this.trace('act', { name: p.name, kind, target: arg && arg.target });
     const hn = p.char, me = this.P(hn);
     if (!me || me.isDead()) return;
     const valid = n => typeof n === 'string' && !!this.P(n) && !this.P(n).isDead();
@@ -480,6 +522,7 @@ export class Room extends DurableObject {
     this.result = { winner: alive.length === 1 ? alive[0].name : null, ranking, rounds: this.round };
     this.phase = 'over'; this.turn = null;
     this.broadcast(Object.assign({ t: 'over' }, this.result));
+    this.trace('over', { winner: this.result.winner, rounds: this.round });
     this.pushLobby();
     return true;
   }
@@ -530,8 +573,11 @@ export class Room extends DurableObject {
       const names = [...this.lootPending.keys()].map(pid => (this.playerOf(pid) || {}).name).filter(Boolean);
       if (names.length) this.broadcast({ t: 'fx', kind: 'lootwait', names });
     }, 6000);
+    const lt0 = Date.now();
+    this.trace('lootStart', { waiting: [...this.lootPending.keys()].map(pid => this.nameOf(pid)) });
     await Promise.all(waits);
     clearTimeout(nag);
+    this.trace('lootPicked', { ms: Date.now() - lt0, picks: [...picks.entries()].map(([c, v]) => c + ':' + (v ? 'ok' : 'none')) });
     if (gen !== this.gen) return;
     for (const c of this.conns) this.send(c, { t: 'lootEnd' });
     const cmds = [];

@@ -177,10 +177,29 @@ OO.online = (() => {
     st.running = true;
     while (st.queue.length) {
       const m = st.queue.shift();
-      try { await handle(m); } catch (e) { console.error('联机演出出错', m, e); }
+      st.cur = { t: m.t, seq: m.seq, tag: m.tag, actor: m.actor || m.who, cmds: m.cmds ? m.cmds.length : 0, since: Date.now() };
+      try { await handle(m); } catch (e) { console.error('联机演出出错', m, e); diag('handleError', { item: st.cur, msg: String(e && e.stack || e).slice(0, 400) }); }
+      st.cur = null;
     }
     st.running = false;
   }
+
+  /* 自检：某条消息处理超过 12 秒，或页面报错，就把当时的状态上报给服务器（写进黑匣子） */
+  let diagCount = 0;
+  function diag(kind, extra = {}) {
+    if (diagCount++ > 30) return;
+    net.send({ t: 'diag', d: Object.assign({
+      kind, q: st.queue.length, myTurn: st.myTurn, busy: st.busy, turn: st.turn, round: st.round,
+      hidden: document.hidden, instant: OO.U.instant, fps: Math.round(OO.world.fps || 0),
+      slowmo: OO.U.time.slowmo, freeze: +OO.U.time.freeze.toFixed(3), speed: OO.U.time.speed,
+    }, extra) });
+  }
+  setInterval(() => {
+    if (st.phase !== 'playing' || !st.cur || st.cur.reported) return;
+    if (Date.now() - st.cur.since > 12000) { st.cur.reported = true; diag('slowItem', { item: st.cur, ms: Date.now() - st.cur.since }); }
+  }, 3000);
+  window.addEventListener('error', e => { if (st.phase === 'playing') diag('jsError', { msg: String(e.message).slice(0, 300), src: (e.filename || '').split('/').pop() + ':' + e.lineno }); });
+  window.addEventListener('unhandledrejection', e => { if (st.phase === 'playing') diag('promiseError', { msg: String(e.reason && e.reason.stack || e.reason).slice(0, 300) }); });
 
   async function handle(m) {
     switch (m.t) {
